@@ -1,5 +1,4 @@
 Flask
 gunicorn
 google-genai
-google-cloud-secret-manager
 firabase-admin
