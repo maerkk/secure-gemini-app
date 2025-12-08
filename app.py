@@ -1,10 +1,12 @@
-# app.py (PÄIVITETTY)
+# app.py (KRIITISESTI KORJATTU VERSIO)
 import os
 from flask import Flask, request, jsonify
 from google import genai
 from google.genai.errors import APIError
-from google.cloud import secretmanager
 from google.auth.exceptions import DefaultCredentialsError
+
+# Uudet tuonnit Secret Managerille (HUOM: Suora tuonti)
+from google.cloud.secretmanager import SecretManagerServiceClient 
 
 # Uudet tuonnit Firestorelle (firebase-admin)
 import firebase_admin
@@ -14,45 +16,57 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# Oletusprojektin ID (käytetään Secret Managerissa ja Firebase Alustuksessa)
+# GCP_PROJECT on Cloud Runin automaattisesti asettama ympäristömuuttuja.
+# Tämä täytyy hakea heti alussa.
+PROJECT_ID = os.environ.get('GCP_PROJECT') 
+
 # --- Firebase & Firestore Alustus ---
-# Alustaa Firebase Admin SDK:n. Cloud Runissa tämä käyttää automaattisesti 
-# Cloud Runin palvelutiliä (jonka IAM-roolit juuri asetimme).
+db = None # Oletetaan, että Firestore ei ole käytössä
+
 try:
+    if not PROJECT_ID:
+        # TÄMÄ KAATAA GUNICORNIN, JOS KUTSUTAAN ENNEN KUIN GCP_PROJECT ON ASETETTU
+        # Mutta Cloud Runissa sen pitäisi olla OK. Jos ei, tämä tulostuu lokiin.
+        raise Exception("GCP_PROJECT puuttuu. Ei voida alustaa Firebasea.")
+        
     if not firebase_admin._apps:
         cred = credentials.ApplicationDefault()
         
-        # LISÄÄ TÄMÄ RIVI VAIKKA IAM ON OK:
-        # Cloud Run Service Accountin pitäisi toimia, mutta asetetaan projekti erikseen
-        project_id_from_env = os.environ.get('GCP_PROJECT', PROJECT_ID)
-
+        # Alustetaan Firebase nimenomaisesti projektin ID:llä
         firebase_admin.initialize_app(cred, {
-            'projectId': project_id_from_env 
+            'projectId': PROJECT_ID 
         })
     db = firestore.client()
+    print("FIREBASE ALUSTUS ONNISTUI!") # TARKISTUSLOKI, näkyy Cloud Loggingissa
+    
 except Exception as e:
-    print(f"FIREBASE VIRHE ALUSTUKSESSA: {e}")
-    db = None # Jos alustus epäonnistuu, db-muuttuja on None.
+    # JOS ALUSTUS EPÄONNISTUU (esim. puuttuva IAM-rooli), emme kaada koko Gunicornia
+    print(f"CRITICAL ERROR: FIREBASE ALUSTUS EPÄONNISTUI: {e}")
+    db = None 
+# ...
 
-# Oletusprojektin ID (käytetään Secret Managerissa)
-PROJECT_ID = os.environ.get('GCP_PROJECT') 
 
 # --- Funktio salaisuuden lukemiseen Secret Managerista ---
 def get_gemini_api_key():
     """Hakee Gemini API-avaimen turvallisesti Secret Managerista."""
+    
     if not PROJECT_ID:
-        # ...
+        # Tämä virhe palautuu, jos GCP_PROJECT ei ole asetettu, mikä on virheellinen tila Cloud Runissa.
+        return "Virhe: GCP-projektin ID (GCP_PROJECT) puuttuu. Palvelu on virheellisesti konfiguroitu."
         
     secret_name = "gemini-api-key"
     resource_name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
 
     try:
-        # KÄYTÄ UUTTA TUONTINIMEÄ TÄSSÄ:
-        client = SecretManagerServiceClient()        response = client.access_secret_version(request={"name": resource_name})
+        client = SecretManagerServiceClient()
+        response = client.access_secret_version(request={"name": resource_name})
         return response.payload.data.decode("UTF-8")
 
     except DefaultCredentialsError:
         return "Virhe: GCP-oikeuksia (DefaultCredentialsError) puuttuu. Tarkista IAM-rooli."
     except Exception as e:
+        # Palauttaa virheen, jos esim. salaisuutta ei löydy (Secret not found)
         return f"Virhe Secret Managerissa: {e}"
 
 
@@ -79,7 +93,6 @@ def ask_gemini():
         # 2. LOKITUS FIRESTOREEN (Lokittaa onnistuneen API-kutsun)
         if db:
             try:
-                # Tallennetaan uusi dokumentti 'gemini_logs' -kokoelmaan
                 db.collection('gemini_logs').add({
                     'timestamp': datetime.now(),
                     'user_prompt': prompt,
@@ -87,9 +100,8 @@ def ask_gemini():
                     'status': 'SUCCESS'
                 })
             except Exception as e:
-                # Jos lokitus epäonnistuu, tulostetaan virhe Cloud Loggingiin
-                print(f"LOKITUSVIRHE: {e}")
-
+                print(f"LOKITUSVIRHE: {e}") # Näkyy Cloud Loggingissa
+        
         # 3. PALAUTA VASTAUS
         return jsonify({
             "status": "success",
