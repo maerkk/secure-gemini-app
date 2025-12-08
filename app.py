@@ -20,7 +20,14 @@ app = Flask(__name__)
 try:
     if not firebase_admin._apps:
         cred = credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred)
+        
+        # LISÄÄ TÄMÄ RIVI VAIKKA IAM ON OK:
+        # Cloud Run Service Accountin pitäisi toimia, mutta asetetaan projekti erikseen
+        project_id_from_env = os.environ.get('GCP_PROJECT', PROJECT_ID)
+
+        firebase_admin.initialize_app(cred, {
+            'projectId': project_id_from_env 
+        })
     db = firestore.client()
 except Exception as e:
     print(f"FIREBASE VIRHE ALUSTUKSESSA: {e}")
