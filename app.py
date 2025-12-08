@@ -40,14 +40,14 @@ PROJECT_ID = os.environ.get('GCP_PROJECT')
 def get_gemini_api_key():
     """Hakee Gemini API-avaimen turvallisesti Secret Managerista."""
     if not PROJECT_ID:
-        return "Virhe: GCP-projektin ID (GCP_PROJECT) puuttuu."
-    
+        # ...
+        
     secret_name = "gemini-api-key"
     resource_name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
 
     try:
-        client = secretmanager.SecretManagerServiceClient()
-        response = client.access_secret_version(request={"name": resource_name})
+        # KÄYTÄ UUTTA TUONTINIMEÄ TÄSSÄ:
+        client = SecretManagerServiceClient()        response = client.access_secret_version(request={"name": resource_name})
         return response.payload.data.decode("UTF-8")
 
     except DefaultCredentialsError:

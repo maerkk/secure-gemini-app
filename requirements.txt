@@ -2,3 +2,4 @@ Flask
 gunicorn
 google-genai
 firebase-admin
+google-cloud-secret-manager
